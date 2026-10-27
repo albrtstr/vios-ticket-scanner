@@ -1,0 +1,112 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ViOS Christmas Carol - Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 24px 16px;
+      background: #f7f7f7;
+      color: #222;
+    }
+    .panel {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 8px;
+      background: #176b45;
+      color: white;
+      font-size: 16px;
+    }
+    #result {
+      overflow-wrap: anywhere;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2>ViOS Christmas Carol</h2>
+    <p>Ticket Check-in Scanner</p>
+    <div id="reader"></div>
+    <button id="startBtn" onclick="startScanner()">
+      Aktifkan Kamera
+    </button>
+    <button onclick="stopScanner()">Matikan Kamera</button>
+    <div id="result" role="status">
+      Kamera belum diaktifkan.
+    </div>
+  </div>
+
+  <script>
+    let scanner = null;
+    let running = false;
+
+    async function startScanner() {
+      const result = document.getElementById("result");
+
+      if (running) return;
+
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error(
+            "Browser tidak menyediakan akses kamera. Pastikan halaman menggunakan HTTPS."
+          );
+        }
+
+        // Uji izin kamera terlebih dahulu.
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
+
+        stream.getTracks().forEach(track => track.stop());
+
+        scanner = new Html5Qrcode("reader");
+
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 230, height: 230 } },
+          decodedText => {
+            result.textContent = "QR berhasil dibaca.";
+            stopScanner();
+          },
+          () => {}
+        );
+
+        running = true;
+        result.textContent = "Kamera aktif. Arahkan ke QR tiket.";
+      } catch (error) {
+        result.textContent =
+          "Kamera gagal dibuka: " + error.message;
+      }
+    }
+
+    async function stopScanner() {
+      if (scanner && running) {
+        try {
+          await scanner.stop();
+          await scanner.clear();
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      running = false;
+      scanner = null;
+    }
+  </script>
+</body>
+</html>
