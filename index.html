@@ -34,12 +34,38 @@
       overflow-wrap: anywhere;
       margin-top: 16px;
     }
+    
+    label {
+      display: block;
+      margin-top: 14px;
+      font-weight: bold;
+    }
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin-top: 6px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
   </style>
 </head>
 <body>
   <div class="panel">
     <h2>ViOS Christmas Carol</h2>
     <p>Ticket Check-in Scanner</p>
+    
+    <label for="staffName">Nama petugas</label>
+    <input id="staffName" autocomplete="name"
+      placeholder="Nama petugas" required>
+    
+    <label for="pin">PIN petugas</label>
+    <input id="pin" type="password"
+      inputmode="numeric" autocomplete="off"
+      placeholder="Masukkan PIN" required>
+
     <div id="reader"></div>
     <button id="startBtn" onclick="startScanner()">
       Aktifkan Kamera
@@ -79,10 +105,7 @@
         await scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 230, height: 230 } },
-          decodedText => {
-            result.textContent = "QR berhasil dibaca.";
-            stopScanner();
-          },
+          decodedText => onQRScanned(decodedText),
           () => {}
         );
 
@@ -107,6 +130,63 @@
       running = false;
       scanner = null;
     }
+
+    
+async function onQrScanned(decodedText) {
+  if (running === false) return;
+
+  await stopScanner();
+
+  const staffName =
+    document.getElementById('staffName').value.trim();
+  const pin =
+    document.getElementById('pin').value;
+
+  if (!staffName || !pin) {
+    document.getElementById('result').textContent =
+      'Isi nama petugas dan PIN sebelum scan.';
+    return;
+  }
+
+  let token = decodedText.trim();
+
+  // QR bisa berisi URL e-ticket atau token langsung.
+  try {
+    const qrUrl = new URL(decodedText);
+    const code = qrUrl.searchParams.get('code');
+
+    if (code) token = code;
+  } catch (_) {
+    // Bukan URL; gunakan isi QR sebagai token.
+  }
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = APPS_SCRIPT_URL;
+  form.target = '_blank';
+
+  const fields = { token, pin, staffName };
+
+  Object.entries(fields).forEach(([name, value]) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  });
+
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+
+  document.getElementById('result').textContent =
+    'Permintaan dikirim. Periksa tab hasil check-in.';
+}
+
+    
+const APPS_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbxzH-YxpxKVy9dhGAJRUbbSWvP1hWTNDzF3zIMtpdEliyQMLMcXQqhbDMu_ijeB35xF2A/exec';
+
   </script>
 </body>
 </html>
