@@ -4,189 +4,363 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ViOS Christmas Carol - Scanner</title>
+  <meta name="theme-color" content="#176b45">
+  <title>ViOS Christmas Carol - Check-in</title>
+
   <script src="https://unpkg.com/html5-qrcode"></script>
+
   <style>
+    * { box-sizing: border-box; }
+
     body {
+      margin: 0;
+      padding: 20px 14px;
       font-family: Arial, sans-serif;
-      max-width: 520px;
+      background: #f2f5f3;
+      color: #202820;
+    }
+
+    .container {
+      max-width: 480px;
       margin: 0 auto;
-      padding: 24px 16px;
-      background: #f7f7f7;
-      color: #222;
     }
-    .panel {
-      background: white;
+
+    .header {
+      text-align: center;
+      padding: 18px 10px;
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      color: #176b45;
+      font-size: 25px;
+    }
+
+    .header p {
+      margin: 0;
+      color: #637067;
+      font-size: 14px;
+    }
+
+    .card {
       padding: 20px;
+      background: #fff;
       border-radius: 16px;
+      box-shadow: 0 4px 18px #0000000c;
     }
+
+    label {
+      display: block;
+      margin: 14px 0 6px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px;
+      border: 1px solid #cbd5ce;
+      border-radius: 9px;
+      font-size: 16px;
+      background: white;
+    }
+
     button {
       width: 100%;
       padding: 14px;
       margin-top: 12px;
       border: 0;
-      border-radius: 8px;
+      border-radius: 9px;
       background: #176b45;
       color: white;
       font-size: 16px;
-    }
-    #result {
-      overflow-wrap: anywhere;
-      margin-top: 16px;
-    }
-    
-    label {
-      display: block;
-      margin-top: 14px;
       font-weight: bold;
-    }
-    input {
-      box-sizing: border-box;
-      width: 100%;
-      padding: 12px;
-      margin-top: 6px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 16px;
+      cursor: pointer;
     }
 
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    button.secondary {
+      background: #e7eee9;
+      color: #176b45;
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 18px;
+      overflow: hidden;
+    }
+
+    #result {
+      display: none;
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 10px;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    #result.show {
+      display: block;
+      background: #edf3ef;
+    }
+
+    .hint {
+      margin-top: 14px;
+      color: #637067;
+      font-size: 12px;
+      line-height: 1.5;
+    }
   </style>
 </head>
-<body>
-  <div class="panel">
-    <h2>ViOS Christmas Carol</h2>
-    <p>Ticket Check-in Scanner</p>
-    
-    <label for="staffName">Nama petugas</label>
-    <input id="staffName" autocomplete="name"
-      placeholder="Nama petugas" required>
-    
-    <label for="pin">PIN petugas</label>
-    <input id="pin" type="password"
-      inputmode="numeric" autocomplete="off"
-      placeholder="Masukkan PIN" required>
 
-    <div id="reader"></div>
-    <button id="startBtn" onclick="startScanner()">
-      Aktifkan Kamera
-    </button>
-    <button onclick="stopScanner()">Matikan Kamera</button>
-    <div id="result" role="status">
-      Kamera belum diaktifkan.
-    </div>
-  </div>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>ViOS Christmas Carol</h1>
+      <p>Bring The Joy · Ticket Check-in</p>
+    </header>
+
+    <section class="card">
+      <form id="staffForm" onsubmit="return false;">
+        <label for="staffName">Nama petugas</label>
+        <input
+          id="staffName"
+          type="text"
+          placeholder="Masukkan nama petugas"
+          autocomplete="name"
+          required
+        >
+
+        <label for="pin">PIN petugas</label>
+        <input
+          id="pin"
+          type="password"
+          placeholder="Masukkan PIN"
+          autocomplete="off"
+          required
+        >
+
+        <button id="startBtn" type="button" onclick="startScanner()">
+          Aktifkan Kamera
+        </button>
+
+        <button
+          id="stopBtn"
+          class="secondary"
+          type="button"
+          onclick="stopScanner()"
+          disabled
+        >
+          Matikan Kamera
+        </button>
+      </form>
+
+      <div id="reader"></div>
+
+      <div id="result" role="status" aria-live="polite"></div>
+
+      <p class="hint">
+        Isi nama dan PIN petugas sebelum memindai QR.
+        Pastikan izin kamera browser sudah diberikan.
+      </p>
+    </section>
+  </main>
 
   <script>
+    // URL deployment Web App Apps Script yang aktif.
+    const APPS_SCRIPT_URL =
+      'https://script.google.com/macros/s/AKfycbxzH-YxpxKVy9dhGAJRUbbSWvP1hWTNDzF3zIMtpdEliyQMLMcXQqhbDMu_ijeB35xF2A/exec';
+
     let scanner = null;
     let running = false;
+    let processing = false;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resultBox = document.getElementById('result');
+
+    function showMessage(message) {
+      resultBox.textContent = message;
+      resultBox.className = 'show';
+    }
+
+    function hideMessage() {
+      resultBox.textContent = '';
+      resultBox.className = '';
+    }
+
+    function getTicketToken(qrText) {
+      const value = String(qrText || '').trim();
+
+      // QR berisi URL e-ticket.
+      try {
+        const url = new URL(value);
+
+        const token =
+          url.searchParams.get('code') ||
+          url.searchParams.get('token');
+
+        if (token) return token.trim();
+      } catch (error) {
+        // QR mungkin berisi token langsung.
+      }
+
+      // QR berisi token langsung.
+      return value;
+    }
 
     async function startScanner() {
-      const result = document.getElementById("result");
+      if (running || processing) return;
 
-      if (running) return;
+      const staffName =
+        document.getElementById('staffName').value.trim();
+      const pin =
+        document.getElementById('pin').value;
+
+      if (!staffName || !pin) {
+        showMessage('Isi nama petugas dan PIN terlebih dahulu.');
+        return;
+      }
+
+      if (!window.Html5Qrcode) {
+        showMessage(
+          'Library scanner gagal dimuat. Periksa koneksi internet lalu muat ulang halaman.'
+        );
+        return;
+      }
+
+      hideMessage();
+      startBtn.disabled = true;
 
       try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error(
-            "Browser tidak menyediakan akses kamera. Pastikan halaman menggunakan HTTPS."
-          );
-        }
-
-        // Uji izin kamera terlebih dahulu.
+        // Meminta izin kamera ketika tombol ditekan.
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
+          video: { facingMode: { ideal: 'environment' } },
           audio: false
         });
 
         stream.getTracks().forEach(track => track.stop());
 
-        scanner = new Html5Qrcode("reader");
+        scanner = new Html5Qrcode('reader');
 
         await scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 230, height: 230 } },
-          decodedText => onQRScanned(decodedText),
-          () => {}
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 230, height: 230 },
+            aspectRatio: 1
+          },
+          onQrScanned,
+          function () {
+            // Callback ini dipanggil saat frame belum berisi QR.
+          }
         );
 
         running = true;
-        result.textContent = "Kamera aktif. Arahkan ke QR tiket.";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        showMessage('Kamera aktif. Arahkan QR tiket ke kotak scanner.');
       } catch (error) {
-        result.textContent =
-          "Kamera gagal dibuka: " + error.message;
+        running = false;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+
+        showMessage(
+          'Kamera gagal dibuka: ' +
+          (error && error.message ? error.message : String(error))
+        );
       }
     }
 
     async function stopScanner() {
-      if (scanner && running) {
-        try {
-          await scanner.stop();
-          await scanner.clear();
-        } catch (error) {
-          console.error(error);
-        }
-      }
+      const currentScanner = scanner;
 
       running = false;
       scanner = null;
+
+      if (currentScanner) {
+        try {
+          if (currentScanner.isScanning) {
+            await currentScanner.stop();
+          }
+
+          await currentScanner.clear();
+        } catch (error) {
+          console.warn('Gagal menghentikan scanner:', error);
+        }
+      }
+
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
     }
 
-    
-async function onQrScanned(decodedText) {
-  if (running === false) return;
+    async function onQrScanned(decodedText) {
+      if (!running || processing) return;
 
-  await stopScanner();
+      // Kunci agar callback tidak mengirim tiket berulang kali.
+      processing = true;
 
-  const staffName =
-    document.getElementById('staffName').value.trim();
-  const pin =
-    document.getElementById('pin').value;
+      const staffName =
+        document.getElementById('staffName').value.trim();
+      const pin =
+        document.getElementById('pin').value;
+      const token = getTicketToken(decodedText);
 
-  if (!staffName || !pin) {
-    document.getElementById('result').textContent =
-      'Isi nama petugas dan PIN sebelum scan.';
-    return;
-  }
+      if (!token || !staffName || !pin) {
+        processing = false;
+        showMessage('Kode tiket, nama petugas, atau PIN tidak tersedia.');
+        return;
+      }
 
-  let token = decodedText.trim();
+      await stopScanner();
 
-  // QR bisa berisi URL e-ticket atau token langsung.
-  try {
-    const qrUrl = new URL(decodedText);
-    const code = qrUrl.searchParams.get('code');
+      showMessage('QR terbaca. Mengirim permintaan check-in...');
 
-    if (code) token = code;
-  } catch (_) {
-    // Bukan URL; gunakan isi QR sebagai token.
-  }
+      try {
+        // POST melalui form, tanpa menaruh PIN di URL.
+        // Hasil dari Apps Script akan terbuka di tab yang sama.
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = APPS_SCRIPT_URL;
+        form.target = '_self';
 
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = APPS_SCRIPT_URL;
-  form.target = '_blank';
+        const fields = {
+          token: token,
+          pin: pin,
+          staffName: staffName
+        };
 
-  const fields = { token, pin, staffName };
+        Object.keys(fields).forEach(function (key) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = key;
+          input.value = fields[key];
+          form.appendChild(input);
+        });
 
-  Object.entries(fields).forEach(([name, value]) => {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = name;
-    input.value = value;
-    form.appendChild(input);
-  });
+        document.body.appendChild(form);
+        form.submit();
+      } catch (error) {
+        processing = false;
+        showMessage(
+          'Gagal mengirim permintaan: ' +
+          (error && error.message ? error.message : String(error))
+        );
+        startBtn.disabled = false;
+      }
+    }
 
-  document.body.appendChild(form);
-  form.submit();
-  form.remove();
-
-  document.getElementById('result').textContent =
-    'Permintaan dikirim. Periksa tab hasil check-in.';
-}
-
-    
-const APPS_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbxzH-YxpxKVy9dhGAJRUbbSWvP1hWTNDzF3zIMtpdEliyQMLMcXQqhbDMu_ijeB35xF2A/exec';
-
+    window.addEventListener('pagehide', function () {
+      if (scanner && scanner.isScanning) {
+        scanner.stop().catch(function () {});
+      }
+    });
   </script>
 </body>
 </html>
