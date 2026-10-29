@@ -179,8 +179,7 @@ window.addEventListener('message', function(event) {
 
   const isGoogleAppsScriptOrigin =
     senderHost === 'script.google.com' ||
-    senderHost === 'script.googleusercontent.com' ||
-    senderHost.endsWith('.script.googleusercontent.com');
+    senderHost.endsWith('.googleusercontent.com');
 
   if (!isGoogleAppsScriptOrigin) {
     console.warn('[VIOS Bridge] Origin rejected:', event.origin);
