@@ -159,37 +159,72 @@
       });
     }
 
-    window.addEventListener('message', function(event) {
-      // Apps Script may run the response page inside a nested sandbox frame.
-      // Accept only Google Apps Script response origins; requestId below ties
-      // the response to the outstanding request.
-      let senderHost = '';
-      try { senderHost = new URL(event.origin).hostname; } catch (e) { return; }
-      const isGoogleAppsScriptOrigin =
-        senderHost === 'script.google.com' ||
-        senderHost === 'script.googleusercontent.com' ||
-        senderHost.endsWith('.script.googleusercontent.com');
-      if (!isGoogleAppsScriptOrigin) return;
+    
+window.addEventListener('message', function(event) {
+  console.log('[VIOS Bridge] Message received', {
+    origin: event.origin,
+    source: event.data && event.data.source,
+    requestId: event.data && event.data.requestId,
+    pendingRequestId: pendingRequestId,
+    data: event.data
+  });
 
-      const data = event.data;
-      if (!data || data.source !== BRIDGE_SOURCE || data.requestId !== pendingRequestId) return;
+  let senderHost = '';
+  try {
+    senderHost = new URL(event.origin).hostname;
+  } catch (e) {
+    console.warn('[VIOS Bridge] Invalid origin:', event.origin);
+    return;
+  }
 
-      if (pendingTimeout) clearTimeout(pendingTimeout);
-      pendingTimeout = null;
-      pendingRequestId = null;
-      pendingAction = null;
+  const isGoogleAppsScriptOrigin =
+    senderHost === 'script.google.com' ||
+    senderHost === 'script.googleusercontent.com' ||
+    senderHost.endsWith('.script.googleusercontent.com');
 
-      const resolve = window.__viosPendingResolve;
-      const reject = window.__viosPendingReject;
-      window.__viosPendingResolve = null;
-      window.__viosPendingReject = null;
+  if (!isGoogleAppsScriptOrigin) {
+    console.warn('[VIOS Bridge] Origin rejected:', event.origin);
+    return;
+  }
 
-      if (resolve) {
-        resolve(data.result || { ok: false, message: 'Respons server kosong.' });
-      } else if (reject) {
-        reject(new Error('Respons server tidak dapat diproses.'));
-      }
+  const data = event.data;
+
+  if (!data || data.source !== BRIDGE_SOURCE) {
+    console.warn('[VIOS Bridge] Invalid message source:', data);
+    return;
+  }
+
+  if (data.requestId !== pendingRequestId) {
+    console.warn('[VIOS Bridge] Request ID mismatch:', {
+      received: data.requestId,
+      expected: pendingRequestId
     });
+    return;
+  }
+
+  if (pendingTimeout) clearTimeout(pendingTimeout);
+
+  pendingTimeout = null;
+  pendingRequestId = null;
+  pendingAction = null;
+
+  const resolve = window.__viosPendingResolve;
+  const reject = window.__viosPendingReject;
+
+  window.__viosPendingResolve = null;
+  window.__viosPendingReject = null;
+
+  if (resolve) {
+    console.log('[VIOS Bridge] Resolving request:', data.result);
+    resolve(data.result || {
+      ok: false,
+      message: 'Respons server kosong.'
+    });
+  } else if (reject) {
+    reject(new Error('Respons server tidak dapat diproses.'));
+  }
+});
+
 
     async function login() {
       const staffName = document.getElementById('staffName').value.trim();
