@@ -160,9 +160,16 @@
     }
 
     window.addEventListener('message', function(event) {
-      // Apps Script may redirect the bridge document to script.googleusercontent.com.
-      // Validate the exact iframe source rather than hard-coding the origin.
-      if (!bridgeFrame || event.source !== bridgeFrame.contentWindow) return;
+      // Apps Script may run the response page inside a nested sandbox frame.
+      // Accept only Google Apps Script response origins; requestId below ties
+      // the response to the outstanding request.
+      let senderHost = '';
+      try { senderHost = new URL(event.origin).hostname; } catch (e) { return; }
+      const isGoogleAppsScriptOrigin =
+        senderHost === 'script.google.com' ||
+        senderHost === 'script.googleusercontent.com' ||
+        senderHost.endsWith('.script.googleusercontent.com');
+      if (!isGoogleAppsScriptOrigin) return;
 
       const data = event.data;
       if (!data || data.source !== BRIDGE_SOURCE || data.requestId !== pendingRequestId) return;
