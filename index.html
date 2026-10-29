@@ -160,19 +160,28 @@
     }
 
     window.addEventListener('message', function(event) {
-      if (event.origin !== new URL(APPS_SCRIPT_URL).origin) return;
+      // Apps Script may redirect the bridge document to script.googleusercontent.com.
+      // Validate the exact iframe source rather than hard-coding the origin.
+      if (!bridgeFrame || event.source !== bridgeFrame.contentWindow) return;
+
       const data = event.data;
       if (!data || data.source !== BRIDGE_SOURCE || data.requestId !== pendingRequestId) return;
+
       if (pendingTimeout) clearTimeout(pendingTimeout);
       pendingTimeout = null;
       pendingRequestId = null;
       pendingAction = null;
+
       const resolve = window.__viosPendingResolve;
       const reject = window.__viosPendingReject;
       window.__viosPendingResolve = null;
       window.__viosPendingReject = null;
-      if (resolve) resolve(data.result || { ok: false, message: 'Respons server kosong.' });
-      else if (reject) reject(new Error('Respons server tidak dapat diproses.'));
+
+      if (resolve) {
+        resolve(data.result || { ok: false, message: 'Respons server kosong.' });
+      } else if (reject) {
+        reject(new Error('Respons server tidak dapat diproses.'));
+      }
     });
 
     async function login() {
