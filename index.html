@@ -201,7 +201,8 @@
       const isGoogleAppsScriptOrigin =
         senderHost === 'script.google.com' ||
         senderHost === 'script.googleusercontent.com' ||
-        senderHost.endsWith('.script.googleusercontent.com');
+        senderHost.endsWith('.script.googleusercontent.com') ||
+        senderHost.endsWith('-script.googleusercontent.com');
       if (!isGoogleAppsScriptOrigin) return;
 
       const data = event.data;
