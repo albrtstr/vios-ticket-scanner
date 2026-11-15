@@ -28,6 +28,10 @@
     .hint { margin-top: 14px; color: #637067; font-size: 12px; line-height: 1.5; }
     .session { display:none; margin: 0 0 10px; padding: 10px 12px; background: #edf3ef; border-radius: 9px; font-size: 13px; }
     .hidden { display:none !important; }
+    .action-row { display:flex; gap:10px; }
+    .action-row button { flex:1; }
+    .ticket-detail { margin-top:14px; padding:14px; border:1px solid #d8e4dc; border-radius:10px; background:#f8fbf9; line-height:1.7; }
+    .ticket-detail strong { color:#176b45; }
     #bridgeFrame { display:none; width:0; height:0; border:0; }
   </style>
 </head>
@@ -51,9 +55,23 @@
         <button id="stopBtn" class="secondary" type="button" disabled>Matikan Kamera</button>
         <button id="logoutBtn" class="danger" type="button">Logout</button>
       </div>
+      <section id="confirmPanel" class="hidden">
+        <h3>Konfirmasi Check-in</h3>
+        <p>Pastikan data tiket berikut sudah sesuai sebelum melanjutkan.</p>
+        <div id="ticketDetail" class="ticket-detail"></div>
+        <div class="action-row">
+          <button id="confirmCheckinBtn" type="button">Lanjut Check-in</button>
+          <button id="cancelCheckinBtn" class="secondary" type="button">Batal</button>
+        </div>
+      </section>
+      <section id="successPanel" class="hidden">
+        <h3>Check-in Berhasil!</h3>
+        <div id="successDetail" class="ticket-detail"></div>
+        <button id="backToScannerBtn" type="button">Kembali ke QR Scanner</button>
+      </section>
       <div id="reader"></div>
       <div id="result" role="status" aria-live="polite"></div>
-      <p class="hint">Login memerlukan koneksi internet. Sesi berlaku maksimal 8 jam dan divalidasi oleh server. Berikan izin kamera pada browser saat diminta.</p>
+      <p class="hint">Login memerlukan koneksi internet. Setelah QR terbaca, petugas diminta mengonfirmasi sebelum check-in dicatat. Sesi berlaku maksimal 8 jam. Berikan izin kamera pada browser saat diminta.</p>
     </section>
   </main>
   <iframe id="bridgeFrame" name="bridgeFrame" title="Koneksi aman ke server"></iframe>
@@ -79,6 +97,15 @@
     const resultBox = document.getElementById('result');
     const sessionInfo = document.getElementById('sessionInfo');
     const bridgeFrame = document.getElementById('bridgeFrame');
+    const confirmPanel = document.getElementById('confirmPanel');
+    const successPanel = document.getElementById('successPanel');
+    const ticketDetail = document.getElementById('ticketDetail');
+    const successDetail = document.getElementById('successDetail');
+    const confirmCheckinBtn = document.getElementById('confirmCheckinBtn');
+    const cancelCheckinBtn = document.getElementById('cancelCheckinBtn');
+    const backToScannerBtn = document.getElementById('backToScannerBtn');
+    let pendingTicketToken = '';
+    let pendingTicketInfo = null;
 
     function showMessage(message, type) {
       resultBox.textContent = message || '';
@@ -107,12 +134,18 @@
     function showLoggedIn(session) {
       loginForm.classList.add('hidden');
       scannerControls.classList.remove('hidden');
+      confirmPanel.classList.add('hidden');
+      successPanel.classList.add('hidden');
+      document.getElementById('reader').classList.remove('hidden');
       sessionInfo.style.display = 'block';
       sessionInfo.textContent = 'Login: ' + session.staffName + ' · Sesi berakhir ' + new Date(Number(session.expiresAt)).toLocaleString('id-ID');
     }
     function showLoggedOut() {
       loginForm.classList.remove('hidden');
       scannerControls.classList.add('hidden');
+      confirmPanel.classList.add('hidden');
+      successPanel.classList.add('hidden');
+      document.getElementById('reader').classList.add('hidden');
       sessionInfo.style.display = 'none';
       startBtn.disabled = false;
       stopBtn.disabled = true;
@@ -159,71 +192,37 @@
       });
     }
 
-    
-window.addEventListener('message', function(event) {
-  console.log('[VIOS Bridge] Message received', {
-    origin: event.origin,
-    source: event.data && event.data.source,
-    requestId: event.data && event.data.requestId,
-    pendingRequestId: pendingRequestId,
-    data: event.data
-  });
+    window.addEventListener('message', function(event) {
+      // Apps Script may run the response page inside a nested sandbox frame.
+      // Accept only Google Apps Script response origins; requestId below ties
+      // the response to the outstanding request.
+      let senderHost = '';
+      try { senderHost = new URL(event.origin).hostname; } catch (e) { return; }
+      const isGoogleAppsScriptOrigin =
+        senderHost === 'script.google.com' ||
+        senderHost === 'script.googleusercontent.com' ||
+        senderHost.endsWith('.script.googleusercontent.com');
+      if (!isGoogleAppsScriptOrigin) return;
 
-  let senderHost = '';
-  try {
-    senderHost = new URL(event.origin).hostname;
-  } catch (e) {
-    console.warn('[VIOS Bridge] Invalid origin:', event.origin);
-    return;
-  }
+      const data = event.data;
+      if (!data || data.source !== BRIDGE_SOURCE || data.requestId !== pendingRequestId) return;
 
-  const isGoogleAppsScriptOrigin =
-    senderHost === 'script.google.com' ||
-    senderHost.endsWith('.googleusercontent.com');
+      if (pendingTimeout) clearTimeout(pendingTimeout);
+      pendingTimeout = null;
+      pendingRequestId = null;
+      pendingAction = null;
 
-  if (!isGoogleAppsScriptOrigin) {
-    console.warn('[VIOS Bridge] Origin rejected:', event.origin);
-    return;
-  }
+      const resolve = window.__viosPendingResolve;
+      const reject = window.__viosPendingReject;
+      window.__viosPendingResolve = null;
+      window.__viosPendingReject = null;
 
-  const data = event.data;
-
-  if (!data || data.source !== BRIDGE_SOURCE) {
-    console.warn('[VIOS Bridge] Invalid message source:', data);
-    return;
-  }
-
-  if (data.requestId !== pendingRequestId) {
-    console.warn('[VIOS Bridge] Request ID mismatch:', {
-      received: data.requestId,
-      expected: pendingRequestId
+      if (resolve) {
+        resolve(data.result || { ok: false, message: 'Respons server kosong.' });
+      } else if (reject) {
+        reject(new Error('Respons server tidak dapat diproses.'));
+      }
     });
-    return;
-  }
-
-  if (pendingTimeout) clearTimeout(pendingTimeout);
-
-  pendingTimeout = null;
-  pendingRequestId = null;
-  pendingAction = null;
-
-  const resolve = window.__viosPendingResolve;
-  const reject = window.__viosPendingReject;
-
-  window.__viosPendingResolve = null;
-  window.__viosPendingReject = null;
-
-  if (resolve) {
-    console.log('[VIOS Bridge] Resolving request:', data.result);
-    resolve(data.result || {
-      ok: false,
-      message: 'Respons server kosong.'
-    });
-  } else if (reject) {
-    reject(new Error('Respons server tidak dapat diproses.'));
-  }
-});
-
 
     async function login() {
       const staffName = document.getElementById('staffName').value.trim();
@@ -327,27 +326,103 @@ window.addEventListener('message', function(event) {
         await stopScanner(); return;
       }
       await stopScanner();
-      showMessage('QR terbaca. Memvalidasi tiket...', '');
+      showMessage('QR terbaca. Memeriksa data tiket...', '');
       try {
-        const result = await sendBridgeRequest('checkin', { token, sessionToken: session.sessionToken });
+        const result = await sendBridgeRequest('ticketinfo', { token, sessionToken: session.sessionToken });
         if (result.sessionExpired) {
           localStorage.removeItem(SESSION_STORAGE_KEY); showLoggedOut();
+          showMessage(result.message || 'Sesi berakhir. Silakan login kembali.', 'error');
+          return;
         }
-        const lines = [result.message || (result.ok ? 'CHECK-IN BERHASIL' : 'CHECK-IN GAGAL')];
-        if (result.name) lines.push('Nama: ' + result.name);
-        if (result.orderId) lines.push('Order ID: ' + result.orderId);
-        if (result.checkedInBy) lines.push('Petugas: ' + result.checkedInBy);
-        if (result.checkInTime) lines.push('Waktu: ' + new Date(result.checkInTime).toLocaleString('id-ID'));
-        showMessage(lines.join('\n'), result.ok ? 'success' : 'error');
+        if (!result.ok) {
+          showMessage(result.message || 'Tiket tidak dapat digunakan.', 'error');
+          return;
+        }
+        if (result.ticketStatus !== 'Active') {
+          showMessage(result.ticketStatus === 'Used' ? 'TIKET SUDAH DIGUNAKAN.' : 'Tiket tidak aktif.', 'error');
+          return;
+        }
+        pendingTicketToken = token;
+        pendingTicketInfo = result;
+        ticketDetail.innerHTML = '<strong>Nomor Tiket:</strong> ' + escapeHtml(result.ticketNo || '-') + '<br>' +
+          '<strong>Nama:</strong> ' + escapeHtml(result.name || '-') + '<br>' +
+          '<strong>Order ID:</strong> ' + escapeHtml(result.orderId || '-') + '<br>' +
+          '<strong>Status:</strong> ' + escapeHtml(result.ticketStatus || '-') + '<br>' +
+          '<strong>Petugas:</strong> ' + escapeHtml(session.staffName || '-');
+        scannerControls.classList.add('hidden');
+        document.getElementById('reader').classList.add('hidden');
+        confirmPanel.classList.remove('hidden');
+        hideMessage();
+      } catch (error) {
+        showMessage('Gagal memeriksa tiket: ' + (error.message || String(error)), 'error');
+      } finally { processing = false; }
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+      });
+    }
+
+    async function returnToScanner(autoStart) {
+      pendingTicketToken = '';
+      pendingTicketInfo = null;
+      confirmPanel.classList.add('hidden');
+      successPanel.classList.add('hidden');
+      scannerControls.classList.remove('hidden');
+      document.getElementById('reader').classList.remove('hidden');
+      hideMessage();
+      if (autoStart) await startScanner();
+    }
+
+    async function confirmCheckin() {
+      if (!pendingTicketToken || processing) return;
+      const session = getSession();
+      if (!session) {
+        showLoggedOut(); showMessage('Sesi berakhir. Silakan login kembali.', 'error'); return;
+      }
+      processing = true;
+      confirmCheckinBtn.disabled = true;
+      cancelCheckinBtn.disabled = true;
+      showMessage('Memproses check-in...', '');
+      try {
+        const result = await sendBridgeRequest('checkin', { token: pendingTicketToken, sessionToken: session.sessionToken });
+        if (result.sessionExpired) {
+          localStorage.removeItem(SESSION_STORAGE_KEY); showLoggedOut();
+          showMessage(result.message || 'Sesi berakhir. Silakan login kembali.', 'error');
+          return;
+        }
+        if (!result.ok) {
+          showMessage(result.message || 'Check-in gagal.', 'error');
+          return;
+        }
+        confirmPanel.classList.add('hidden');
+        successDetail.innerHTML = '<strong>Nomor Tiket:</strong> ' + escapeHtml(pendingTicketInfo.ticketNo || '-') + '<br>' +
+          '<strong>Nama:</strong> ' + escapeHtml(result.name || pendingTicketInfo.name || '-') + '<br>' +
+          '<strong>Order ID:</strong> ' + escapeHtml(result.orderId || pendingTicketInfo.orderId || '-') + '<br>' +
+          '<strong>Petugas:</strong> ' + escapeHtml(result.checkedInBy || session.staffName || '-') + '<br>' +
+          '<strong>Waktu:</strong> ' + escapeHtml(result.checkInTime ? new Date(result.checkInTime).toLocaleString('id-ID') : '-');
+        successPanel.classList.remove('hidden');
+        document.getElementById('reader').classList.add('hidden');
+        scannerControls.classList.add('hidden');
+        showMessage('CHECK-IN BERHASIL', 'success');
+        pendingTicketToken = '';
       } catch (error) {
         showMessage('Gagal menghubungi server: ' + (error.message || String(error)), 'error');
-      } finally { processing = false; }
+      } finally {
+        processing = false;
+        confirmCheckinBtn.disabled = false;
+        cancelCheckinBtn.disabled = false;
+      }
     }
 
     loginBtn.addEventListener('click', login);
     startBtn.addEventListener('click', startScanner);
     stopBtn.addEventListener('click', stopScanner);
     logoutBtn.addEventListener('click', logout);
+    confirmCheckinBtn.addEventListener('click', confirmCheckin);
+    cancelCheckinBtn.addEventListener('click', function() { returnToScanner(true); });
+    backToScannerBtn.addEventListener('click', function() { returnToScanner(true); });
     window.addEventListener('pagehide', function() {
       if (scanner && scanner.isScanning) scanner.stop().catch(function() {});
     });
