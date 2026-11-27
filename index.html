@@ -15,7 +15,8 @@
     .header p { margin: 0; color: #637067; font-size: 14px; }
     .card { padding: 20px; background: #fff; border-radius: 16px; box-shadow: 0 4px 18px #0000000c; }
     label { display: block; margin: 14px 0 6px; font-size: 14px; font-weight: bold; }
-    input { width: 100%; padding: 13px; border: 1px solid #cbd5ce; border-radius: 9px; font-size: 16px; background: white; }
+    input, select { width: 100%; padding: 13px; border: 1px solid #cbd5ce; border-radius: 9px; font-size: 16px; background: white; }
+    select { color: #202820; }
     button { width: 100%; padding: 14px; margin-top: 12px; border: 0; border-radius: 9px; background: #176b45; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     button.secondary { background: #e7eee9; color: #176b45; }
@@ -33,6 +34,9 @@
     .ticket-detail { margin-top:14px; padding:14px; border:1px solid #d8e4dc; border-radius:10px; background:#f8fbf9; line-height:1.7; }
     .ticket-detail strong { color:#176b45; }
     #bridgeFrame { display:none; width:0; height:0; border:0; }
+    .manual-panel { margin-top:16px; padding:14px; border:1px solid #d8e4dc; border-radius:10px; background:#f8fbf9; }
+    .section-title { margin:0 0 6px; color:#176b45; font-size:16px; }
+    .small-hint { margin:6px 0 0; color:#637067; font-size:12px; line-height:1.45; }
   </style>
 </head>
 <body>
@@ -51,6 +55,9 @@
         <button id="loginBtn" type="button">Login Petugas</button>
       </form>
       <div id="scannerControls" class="hidden">
+        <label for="cameraSelect">Pilih kamera</label>
+        <select id="cameraSelect" aria-label="Pilih kamera"><option value="">Kamera belakang otomatis</option></select>
+        <p class="small-hint">Pilih kamera belakang utama (Main/Back/Rear) jika tersedia. Nama lensa bergantung pada perangkat dan browser.</p>
         <button id="startBtn" type="button">Aktifkan Kamera</button>
         <button id="stopBtn" class="secondary" type="button" disabled>Matikan Kamera</button>
         <button id="logoutBtn" class="danger" type="button">Logout</button>
@@ -68,6 +75,13 @@
         <h3>Check-in Berhasil!</h3>
         <div id="successDetail" class="ticket-detail"></div>
         <button id="backToScannerBtn" type="button">Kembali ke QR Scanner</button>
+      </section>
+      <section id="manualPanel" class="manual-panel hidden">
+        <h3 class="section-title">Manual Check-in</h3>
+        <p class="small-hint">Jika QR pada tiket fisik tidak terbaca, masukkan Ticket No yang tercetak pada tiket.</p>
+        <label for="manualTicketNo">Ticket Number</label>
+        <input id="manualTicketNo" type="text" placeholder="Contoh: VCC26-R001" autocomplete="off" autocapitalize="characters">
+        <button id="manualLookupBtn" type="button">Periksa Nomor Tiket</button>
       </section>
       <div id="reader"></div>
       <div id="result" role="status" aria-live="polite"></div>
@@ -104,8 +118,15 @@
     const confirmCheckinBtn = document.getElementById('confirmCheckinBtn');
     const cancelCheckinBtn = document.getElementById('cancelCheckinBtn');
     const backToScannerBtn = document.getElementById('backToScannerBtn');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const manualPanel = document.getElementById('manualPanel');
+    const manualTicketNo = document.getElementById('manualTicketNo');
+    const manualLookupBtn = document.getElementById('manualLookupBtn');
     let pendingTicketToken = '';
     let pendingTicketInfo = null;
+    let pendingTicketNo = '';
+    let pendingCheckinMode = 'token';
+    let cameraList = [];
 
     function showMessage(message, type) {
       resultBox.textContent = message || '';
@@ -134,6 +155,7 @@
     function showLoggedIn(session) {
       loginForm.classList.add('hidden');
       scannerControls.classList.remove('hidden');
+      manualPanel.classList.remove('hidden');
       confirmPanel.classList.add('hidden');
       successPanel.classList.add('hidden');
       document.getElementById('reader').classList.remove('hidden');
@@ -143,6 +165,7 @@
     function showLoggedOut() {
       loginForm.classList.remove('hidden');
       scannerControls.classList.add('hidden');
+      manualPanel.classList.add('hidden');
       confirmPanel.classList.add('hidden');
       successPanel.classList.add('hidden');
       document.getElementById('reader').classList.add('hidden');
@@ -272,6 +295,48 @@
       showMessage('Kamu sudah logout dari scanner.', 'success');
     }
 
+    function cameraPreferenceScore(label) {
+      const value = String(label || '').toLowerCase();
+      let score = 0;
+      if (/ultra.?wide|ultrawide|0\.5x|wide angle|fisheye/.test(value)) score -= 100;
+      if (/back|rear|environment|belakang/.test(value)) score += 30;
+      if (/main|primary|wide camera|1x|1\.0x/.test(value)) score += 20;
+      if (/front|user|selfie|facetime/.test(value)) score -= 50;
+      return score;
+    }
+
+    async function refreshCameraList() {
+      if (!window.Html5Qrcode || !Html5Qrcode.getCameras) return;
+      try {
+        const cameras = await Html5Qrcode.getCameras();
+        cameraList = cameras || [];
+        const previous = cameraSelect.value;
+        cameraSelect.innerHTML = '';
+        const auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = 'Kamera belakang otomatis';
+        cameraSelect.appendChild(auto);
+        cameraList.forEach((camera, index) => {
+          const option = document.createElement('option');
+          option.value = camera.id;
+          option.textContent = camera.label || ('Kamera ' + (index + 1));
+          cameraSelect.appendChild(option);
+        });
+        const preferred = cameraList.slice().sort((a, b) =>
+          cameraPreferenceScore(b.label) - cameraPreferenceScore(a.label)
+        )[0];
+        if (previous && cameraList.some(c => c.id === previous)) {
+          cameraSelect.value = previous;
+        } else if (preferred && cameraPreferenceScore(preferred.label) > 0) {
+          cameraSelect.value = preferred.id;
+        } else {
+          cameraSelect.value = '';
+        }
+      } catch (error) {
+        console.warn('Daftar kamera tidak dapat dibaca:', error);
+      }
+    }
+
     async function startScanner() {
       if (running || processing) return;
       const valid = await validateSession();
@@ -280,18 +345,24 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showMessage('Browser tidak mendukung akses kamera atau halaman tidak menggunakan HTTPS.', 'error'); return; }
       hideMessage(); startBtn.disabled = true;
       try {
+        // Meminta izin kamera terlebih dahulu agar browser mengungkapkan label perangkat.
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
         stream.getTracks().forEach(track => track.stop());
+        await refreshCameraList();
         scanner = new Html5Qrcode('reader');
-        await scanner.start({ facingMode: 'environment' }, {
+        const selectedCameraId = cameraSelect.value;
+        const cameraConfig = selectedCameraId ? selectedCameraId : { facingMode: 'environment' };
+        await scanner.start(cameraConfig, {
           fps: 10,
           qrbox: function(width, height) { const size = Math.floor(Math.min(width, height) * 0.8); return { width: size, height: size }; },
           aspectRatio: 1
         }, function(decodedText) { onQrScanned(decodedText); }, function() {});
         running = true; startBtn.disabled = true; stopBtn.disabled = false;
+        cameraSelect.disabled = true;
         showMessage('Kamera aktif. Arahkan QR tiket ke kotak scanner.');
       } catch (error) {
         running = false; startBtn.disabled = false; stopBtn.disabled = true;
+        cameraSelect.disabled = false;
         showMessage('Kamera gagal dibuka: ' + (error && error.message ? error.message : String(error)), 'error');
       }
     }
@@ -304,6 +375,7 @@
         catch (error) { console.warn('Gagal menghentikan scanner:', error); }
       }
       startBtn.disabled = false; stopBtn.disabled = true;
+      cameraSelect.disabled = false;
     }
 
     function getTicketToken(qrText) {
@@ -314,6 +386,68 @@
         if (token) return token.trim();
       } catch (error) { /* QR dapat berisi token langsung. */ }
       return value;
+    }
+
+    function showTicketConfirmation(result, mode, tokenOrNo) {
+      if (!result || !result.ok) {
+        showMessage(result && result.message ? result.message : 'Tiket tidak dapat digunakan.', 'error');
+        return;
+      }
+      if (result.ticketStatus !== 'Active') {
+        showMessage(result.ticketStatus === 'Used' ? 'TIKET SUDAH DIGUNAKAN.' : 'Tiket tidak aktif.', 'error');
+        return;
+      }
+      pendingCheckinMode = mode;
+      pendingTicketToken = mode === 'token' ? tokenOrNo : '';
+      pendingTicketNo = mode === 'ticketNo' ? tokenOrNo : '';
+      pendingTicketInfo = result;
+      ticketDetail.innerHTML = '<strong>Nomor Tiket:</strong> ' + escapeHtml(result.ticketNo || '-') + '<br>' +
+        '<strong>Nama:</strong> ' + escapeHtml(result.name || '-') + '<br>' +
+        '<strong>Order ID:</strong> ' + escapeHtml(result.orderId || '-') + '<br>' +
+        '<strong>Status:</strong> ' + escapeHtml(result.ticketStatus || '-') + '<br>' +
+        '<strong>Petugas:</strong> ' + escapeHtml((getSession() || {}).staffName || '-');
+      scannerControls.classList.add('hidden');
+      manualPanel.classList.add('hidden');
+      document.getElementById('reader').classList.add('hidden');
+      confirmPanel.classList.remove('hidden');
+      hideMessage();
+    }
+
+    async function lookupManualTicket() {
+      if (processing) return;
+      const ticketNo = String(manualTicketNo.value || '').trim().toUpperCase();
+      const session = getSession();
+      if (!session) {
+        showLoggedOut();
+        showMessage('Sesi berakhir. Silakan login kembali.', 'error');
+        return;
+      }
+      if (!ticketNo) {
+        showMessage('Masukkan Ticket No terlebih dahulu.', 'error');
+        manualTicketNo.focus();
+        return;
+      }
+      processing = true;
+      manualLookupBtn.disabled = true;
+      showMessage('Memeriksa nomor tiket...', '');
+      try {
+        const result = await sendBridgeRequest('ticketinfobyno', {
+          ticketNo: ticketNo,
+          sessionToken: session.sessionToken
+        });
+        if (result.sessionExpired) {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          showLoggedOut();
+          showMessage(result.message || 'Sesi berakhir. Silakan login kembali.', 'error');
+          return;
+        }
+        showTicketConfirmation(result, 'ticketNo', ticketNo);
+      } catch (error) {
+        showMessage('Gagal memeriksa tiket: ' + (error.message || String(error)), 'error');
+      } finally {
+        processing = false;
+        manualLookupBtn.disabled = false;
+      }
     }
 
     async function onQrScanned(decodedText) {
@@ -335,25 +469,7 @@
           showMessage(result.message || 'Sesi berakhir. Silakan login kembali.', 'error');
           return;
         }
-        if (!result.ok) {
-          showMessage(result.message || 'Tiket tidak dapat digunakan.', 'error');
-          return;
-        }
-        if (result.ticketStatus !== 'Active') {
-          showMessage(result.ticketStatus === 'Used' ? 'TIKET SUDAH DIGUNAKAN.' : 'Tiket tidak aktif.', 'error');
-          return;
-        }
-        pendingTicketToken = token;
-        pendingTicketInfo = result;
-        ticketDetail.innerHTML = '<strong>Nomor Tiket:</strong> ' + escapeHtml(result.ticketNo || '-') + '<br>' +
-          '<strong>Nama:</strong> ' + escapeHtml(result.name || '-') + '<br>' +
-          '<strong>Order ID:</strong> ' + escapeHtml(result.orderId || '-') + '<br>' +
-          '<strong>Status:</strong> ' + escapeHtml(result.ticketStatus || '-') + '<br>' +
-          '<strong>Petugas:</strong> ' + escapeHtml(session.staffName || '-');
-        scannerControls.classList.add('hidden');
-        document.getElementById('reader').classList.add('hidden');
-        confirmPanel.classList.remove('hidden');
-        hideMessage();
+        showTicketConfirmation(result, 'token', token);
       } catch (error) {
         showMessage('Gagal memeriksa tiket: ' + (error.message || String(error)), 'error');
       } finally { processing = false; }
@@ -367,10 +483,13 @@
 
     async function returnToScanner(autoStart) {
       pendingTicketToken = '';
+      pendingTicketNo = '';
+      pendingCheckinMode = 'token';
       pendingTicketInfo = null;
       confirmPanel.classList.add('hidden');
       successPanel.classList.add('hidden');
       scannerControls.classList.remove('hidden');
+      manualPanel.classList.remove('hidden');
       document.getElementById('reader').classList.remove('hidden');
       hideMessage();
       if (autoStart) await startScanner();
@@ -387,7 +506,11 @@
       cancelCheckinBtn.disabled = true;
       showMessage('Memproses check-in...', '');
       try {
-        const result = await sendBridgeRequest('checkin', { token: pendingTicketToken, sessionToken: session.sessionToken });
+        const checkinAction = pendingCheckinMode === 'ticketNo' ? 'checkinbyno' : 'checkin';
+        const checkinFields = pendingCheckinMode === 'ticketNo'
+          ? { ticketNo: pendingTicketNo, sessionToken: session.sessionToken }
+          : { token: pendingTicketToken, sessionToken: session.sessionToken };
+        const result = await sendBridgeRequest(checkinAction, checkinFields);
         if (result.sessionExpired) {
           localStorage.removeItem(SESSION_STORAGE_KEY); showLoggedOut();
           showMessage(result.message || 'Sesi berakhir. Silakan login kembali.', 'error');
@@ -424,6 +547,8 @@
     confirmCheckinBtn.addEventListener('click', confirmCheckin);
     cancelCheckinBtn.addEventListener('click', function() { returnToScanner(true); });
     backToScannerBtn.addEventListener('click', function() { returnToScanner(true); });
+    manualLookupBtn.addEventListener('click', lookupManualTicket);
+    manualTicketNo.addEventListener('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); lookupManualTicket(); } });
     window.addEventListener('pagehide', function() {
       if (scanner && scanner.isScanning) scanner.stop().catch(function() {});
     });
